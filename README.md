@@ -49,7 +49,11 @@ To save the augmented data in .bin files and the data info in .txt files
 cd tools/data_converter
 python deeproute_generate_aug_data.py  --format
 ```
-
+To facilitate the use of multi-thread process for faster data generating
+```python
+cd tools/data_converter
+python deeproute_generate_aug_data.py --num_parts 5  --format 
+```
 
 <div align="center">
   <img src="resources/mmdet3d-logo.png" width="600"/>

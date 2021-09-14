@@ -76,10 +76,10 @@ def generate_augmented_database(dataset_cfg,
         pickle.dump(all_db_infos, f)
 
 
-def generate_augmented_data_in_anno_format(dataset_cfg,
-                                        info_path=None,
+def generate_augmented_data_in_anno_format(dataset,
+                                        database_save_path,
+                                        start_idx, end_idx,
                                 used_classes=None,
-                                database_save_path=None,
                                 db_info_save_path=None):
     """Given the raw data, generate the ground truth database.
 
@@ -101,44 +101,68 @@ def generate_augmented_data_in_anno_format(dataset_cfg,
             Default: False.
     """
 
-    dataset = build_dataset(dataset_cfg)
-
-    if database_save_path is None:
-        database_save_path = osp.join(dataset_cfg['data_root'], dataset_cfg['split'], 'aug_pointcloud')
     mmcv.mkdir_or_exist(database_save_path)
 
     group_counter = 0
     gt_dets = []
-    for j in track_iter_progress(list(range(len(dataset)))):
-        input_dict = dataset.get_data_info(j)
-        if input_dict is None:
-            print(f'no annotations: {j}', flush=True)
-            continue
-        gt_info = {}
-        dataset.pre_pipeline(input_dict)
-        example = dataset.pipeline(input_dict)
-        annos = example['ann_info']
-        image_idx = example['sample_idx']
-        points = example['points'].data.numpy()
-        pts_filename = os.path.basename(input_dict['pts_filename'])  # .replace('.bin', '.npy')
-        # save points
-        pts_save_file = os.path.join(database_save_path, pts_filename)
-        # with open(pts_save_file, 'wb') as f:
-        #     np.save(f, points)
-        with open(pts_save_file, 'w') as f:
-            points.tofile(f)
+    if start_idx == 0:
+        for j in track_iter_progress(list(range(start_idx, end_idx))):
+            input_dict = dataset.get_data_info(j)
+            if input_dict is None:
+                print(f'no annotations: {j}', flush=True)
+                continue
+            gt_info = {}
+            dataset.pre_pipeline(input_dict)
+            example = dataset.pipeline(input_dict)
+            annos = example['ann_info']
+            image_idx = example['sample_idx']
+            points = example['points'].data.numpy()
+            pts_filename = os.path.basename(input_dict['pts_filename'])  # .replace('.bin', '.npy')
+            # save points
+            pts_save_file = os.path.join(database_save_path, pts_filename)
+            # with open(pts_save_file, 'wb') as f:
+            #     np.save(f, points)
+            with open(pts_save_file, 'w') as f:
+                points.tofile(f)
 
-        gt_info['boxes_3d'] = example['gt_bboxes_3d'].data.tensor
-        gt_info['scores_3d'] = torch.ones(gt_info['boxes_3d'].shape[0])
-        gt_info['labels_3d'] = example['gt_labels_3d'].data
-        for idx in range(len(example['is_aug'])):
-            if example['is_aug'][idx] > 0:
-                gt_info['scores_3d'][idx] = 0.99
+            gt_info['boxes_3d'] = example['gt_bboxes_3d'].data.tensor
+            gt_info['scores_3d'] = torch.ones(gt_info['boxes_3d'].shape[0])
+            gt_info['labels_3d'] = example['gt_labels_3d'].data
+            for idx in range(len(example['is_aug'])):
+                if example['is_aug'][idx] > 0:
+                    gt_info['scores_3d'][idx] = 0.99
 
-        gt_dets.append(gt_info)
+            gt_dets.append(gt_info)
+    else:
+        for j in range(start_idx, end_idx):
+            input_dict = dataset.get_data_info(j)
+            if input_dict is None:
+                # print(f'no annotations: {j}', flush=True)
+                continue
+            gt_info = {}
+            dataset.pre_pipeline(input_dict)
+            example = dataset.pipeline(input_dict)
+            annos = example['ann_info']
+            image_idx = example['sample_idx']
+            points = example['points'].data.numpy()
+            pts_filename = os.path.basename(input_dict['pts_filename'])  # .replace('.bin', '.npy')
+            # save points
+            pts_save_file = os.path.join(database_save_path, pts_filename)
+            # with open(pts_save_file, 'wb') as f:
+            #     np.save(f, points)
+            with open(pts_save_file, 'w') as f:
+                points.tofile(f)
+
+            gt_info['boxes_3d'] = example['gt_bboxes_3d'].data.tensor
+            gt_info['scores_3d'] = torch.ones(gt_info['boxes_3d'].shape[0])
+            gt_info['labels_3d'] = example['gt_labels_3d'].data
+            for idx in range(len(example['is_aug'])):
+                if example['is_aug'][idx] > 0:
+                    gt_info['scores_3d'][idx] = 0.99
+
+            gt_dets.append(gt_info)
 
     dataset.format_results(gt_dets, 'aug_groundtruth')
-
 
 
 point_cloud_range = [-80, -80, -5, 80, 80, 3]   # x y z x y z
@@ -224,17 +248,52 @@ def parse_args():
         '--format',
         action='store_true',
         help='Format the output results')
+    parser.add_argument(
+        '--num_parts', help='save dir',
+        default=5,
+        type=int)
 
     args, _ = parser.parse_known_args()
 
     return args
 
 
+def single_thread_func(start_id, num_parts):
+    dataset = build_dataset(dataset_cfg)
+    num_frames = len(dataset)
+    length = num_frames // num_parts
+    if start_id == num_parts - 1:
+        _range = [start_id * length, num_frames]
+    else:
+        _range = [start_id * length, start_id * length + length]
+
+    database_save_path = osp.join(dataset_cfg['data_root'], dataset_cfg['split'], 'aug_pointcloud')
+    generate_augmented_data_in_anno_format(dataset, database_save_path, _range[0], _range[1])
+
+
 if __name__ == '__main__':
     args = parse_args()
     if args.format:
-        generate_augmented_data_in_anno_format(dataset_cfg)
+        import threading
+        threads = []
+        for i in range(args.num_parts):
+            print(f'i={i}', flush=True)
+            t = threading.Thread(target=single_thread_func, name='single_thread_func', args={i, args.num_parts})
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+        print('end', flush=True)
+        single_thread_func(args.start_id, args.num_parts)
     else:
         generate_augmented_database(dataset_cfg)
+
+
+
+
+
+
+
 
 
