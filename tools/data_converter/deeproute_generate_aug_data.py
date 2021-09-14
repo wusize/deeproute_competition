@@ -102,7 +102,7 @@ def generate_augmented_data_in_anno_format(dataset,
     """
 
     mmcv.mkdir_or_exist(database_save_path)
-
+    print(start_idx, end_idx, flush=True)
     group_counter = 0
     gt_dets = []
     if start_idx == 0:
@@ -266,7 +266,6 @@ def single_thread_func(start_id, num_parts):
         _range = [start_id * length, num_frames]
     else:
         _range = [start_id * length, start_id * length + length]
-
     database_save_path = osp.join(dataset_cfg['data_root'], dataset_cfg['split'], 'aug_pointcloud')
     generate_augmented_data_in_anno_format(dataset, database_save_path, _range[0], _range[1])
 
@@ -277,7 +276,7 @@ if __name__ == '__main__':
         import threading
         threads = []
         for i in range(args.num_parts):
-            print(f'i={i}', flush=True)
+            # print(f'i={i}', flush=True)
             t = threading.Thread(target=single_thread_func, name='single_thread_func', args={i, args.num_parts})
             threads.append(t)
             t.start()
@@ -285,7 +284,6 @@ if __name__ == '__main__':
         for t in threads:
             t.join()
         print('end', flush=True)
-        single_thread_func(args.start_id, args.num_parts)
     else:
         generate_augmented_database(dataset_cfg)
 
