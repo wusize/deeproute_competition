@@ -4,6 +4,7 @@ import mmcv
 import numpy as np
 import pickle
 from mmcv import track_iter_progress
+import glob
 from mmcv.ops import roi_align
 from os import path as osp
 from mmdet3d.core.bbox import box_np_ops as box_np_ops
@@ -77,8 +78,8 @@ def generate_augmented_database(dataset_cfg,
 
 
 def generate_augmented_data_in_anno_format(dataset,
-                                        database_save_path,
-                                        start_idx, end_idx,
+                                          database_save_path,
+                                          start_idx, end_idx,
                                 used_classes=None,
                                 db_info_save_path=None):
     """Given the raw data, generate the ground truth database.
@@ -137,7 +138,7 @@ def generate_augmented_data_in_anno_format(dataset,
         for j in range(start_idx, end_idx):
             input_dict = dataset.get_data_info(j)
             if input_dict is None:
-                # print(f'no annotations: {j}', flush=True)
+                print(f'no annotations: {j}', flush=True)
                 continue
             gt_info = {}
             dataset.pre_pipeline(input_dict)
@@ -161,8 +162,8 @@ def generate_augmented_data_in_anno_format(dataset,
                     gt_info['scores_3d'][idx] = 0.99
 
             gt_dets.append(gt_info)
-
-    dataset.format_results(gt_dets, 'aug_groundtruth')
+    # return gt_dets
+    dataset.format_results(gt_dets, f'aug_groundtruth/part_{start_idx}')
 
 
 point_cloud_range = [-80, -80, -5, 80, 80, 3]   # x y z x y z
@@ -257,9 +258,9 @@ def parse_args():
 
     return args
 
+dataset = build_dataset(dataset_cfg)
 
 def single_thread_func(start_id, num_parts):
-    dataset = build_dataset(dataset_cfg)
     num_frames = len(dataset)
     length = num_frames // num_parts
     if start_id == num_parts - 1:
@@ -284,6 +285,15 @@ if __name__ == '__main__':
         for t in threads:
             t.join()
         print('end', flush=True)
+        datainfo_save_path = osp.join(dataset_cfg['data_root'], dataset_cfg['split'], 'aug_groundtruth')
+        parts_list = glob.glob(f'{datainfo_save_path}/part_*')
+        for part in parts_list:
+            txt_list = glob.glob(f'{part}/*.txt')
+            part_start_id = int(os.path.basename(part).split('_')[-1])
+            for txt in txt_list:
+                base_name = int(os.path.basename(txt).split('.')[0]) + part_start_id
+                os.rename(txt, datainfo_save_path + f'/%05d.txt' % base_name)
+            os.rmdir(part)
     else:
         generate_augmented_database(dataset_cfg)
 
