@@ -202,15 +202,15 @@ db_sampler = dict(
         )),
     classes=class_names,
     sample_groups=dict(
-        CAR=20,
-        VAN=20,
-        TRUCK=20,
+        CAR=5,
+        VAN=15,
+        TRUCK=15,
         BIG_TRUCK=20,
-        BUS=20,
-        PEDESTRIAN=20,
-        CYCLIST=20,
+        BUS=15,
+        PEDESTRIAN=10,
+        CYCLIST=15,
         TRICYCLE=20,
-        CONE=20,
+        CONE=15,
     ))
 
 input_modality = dict(use_lidar=True, use_camera=False)
