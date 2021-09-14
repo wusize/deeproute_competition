@@ -103,16 +103,22 @@ def generate_augmented_data_in_anno_format(dataset,
     """
 
     mmcv.mkdir_or_exist(database_save_path)
-    print(start_idx, end_idx, flush=True)
+    # print(start_idx, end_idx, flush=True)
     group_counter = 0
     gt_dets = []
     if start_idx == 0:
         for j in track_iter_progress(list(range(start_idx, end_idx))):
+            #print('out of limit', j, len(dataset), flush=True)
             input_dict = dataset.get_data_info(j)
+            gt_info = {}
             if input_dict is None:
                 print(f'no annotations: {j}', flush=True)
+                gt_info['boxes_3d'] = torch.empty(0, 7)
+                gt_info['scores_3d'] = torch.empty(0)
+                gt_info['labels_3d'] = []
+                gt_dets.append(gt_info)
                 continue
-            gt_info = {}
+
             dataset.pre_pipeline(input_dict)
             example = dataset.pipeline(input_dict)
             annos = example['ann_info']
@@ -136,11 +142,17 @@ def generate_augmented_data_in_anno_format(dataset,
             gt_dets.append(gt_info)
     else:
         for j in range(start_idx, end_idx):
+            # print('out of limit', j, len(dataset), flush=True)
             input_dict = dataset.get_data_info(j)
+            gt_info = {}
             if input_dict is None:
                 print(f'no annotations: {j}', flush=True)
+                gt_info['boxes_3d'] = torch.empty(0, 7)
+                gt_info['scores_3d'] = torch.empty(0)
+                gt_info['labels_3d'] = []
+                gt_dets.append(gt_info)
                 continue
-            gt_info = {}
+
             dataset.pre_pipeline(input_dict)
             example = dataset.pipeline(input_dict)
             annos = example['ann_info']
@@ -163,7 +175,10 @@ def generate_augmented_data_in_anno_format(dataset,
 
             gt_dets.append(gt_info)
     # return gt_dets
-    dataset.format_results(gt_dets, f'aug_groundtruth/part_{start_idx}')
+    # dataset.format_results(gt_dets, f'aug_groundtruth/part_{start_idx}')
+    with open(f"{database_save_path.replace('aug_pointcloud', '')}"
+              f"/aug_groundtruth/part_{start_idx}.pkl", 'wb') as f:
+        pickle.dump(gt_dets, f)
 
 
 point_cloud_range = [-80, -80, -5, 80, 80, 3]   # x y z x y z
@@ -258,27 +273,32 @@ def parse_args():
 
     return args
 
-dataset = build_dataset(dataset_cfg)
+args = parse_args()
 
-def single_thread_func(start_id, num_parts):
-    num_frames = len(dataset)
-    length = num_frames // num_parts
+dataset = build_dataset(dataset_cfg)
+num_parts = args.num_parts
+num_frames = len(dataset)
+length = num_frames // num_parts
+
+
+def single_thread_func(start_id):
+    print(start_id, num_parts, num_frames, flush=True)
     if start_id == num_parts - 1:
         _range = [start_id * length, num_frames]
     else:
         _range = [start_id * length, start_id * length + length]
+    print(_range, length, flush=True)
     database_save_path = osp.join(dataset_cfg['data_root'], dataset_cfg['split'], 'aug_pointcloud')
     generate_augmented_data_in_anno_format(dataset, database_save_path, _range[0], _range[1])
 
 
 if __name__ == '__main__':
-    args = parse_args()
     if args.format:
         import threading
         threads = []
         for i in range(args.num_parts):
             # print(f'i={i}', flush=True)
-            t = threading.Thread(target=single_thread_func, name='single_thread_func', args={i, args.num_parts})
+            t = threading.Thread(target=single_thread_func, name='single_thread_func', args={i})
             threads.append(t)
             t.start()
 
@@ -286,14 +306,16 @@ if __name__ == '__main__':
             t.join()
         print('end', flush=True)
         datainfo_save_path = osp.join(dataset_cfg['data_root'], dataset_cfg['split'], 'aug_groundtruth')
-        parts_list = glob.glob(f'{datainfo_save_path}/part_*')
+        res = []
+        parts_list = sorted(glob.glob(f'{datainfo_save_path}/part_*.pkl'),
+                            key=lambda x: int(x.split('/')[-1].split('.')[0].split('_')[-1]))
+        print(parts_list)
         for part in parts_list:
-            txt_list = glob.glob(f'{part}/*.txt')
-            part_start_id = int(os.path.basename(part).split('_')[-1])
-            for txt in txt_list:
-                base_name = int(os.path.basename(txt).split('.')[0]) + part_start_id
-                os.rename(txt, datainfo_save_path + f'/%05d.txt' % base_name)
-            os.rmdir(part)
+            with open(part, 'rb') as f:
+                res_ = pickle.load(f)
+                res.extend(res_)
+            os.remove(part)
+        dataset.format_results(res, 'aug_groundtruth')
     else:
         generate_augmented_database(dataset_cfg)
 

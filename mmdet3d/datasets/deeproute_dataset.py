@@ -108,7 +108,7 @@ class DeeprouteDataset(Custom3DDataset):
             pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[18000:]
         else:
             mode = 'training'
-            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:18000]
+            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:200]
         return pcd_list
 
     def get_data_info(self, index):
@@ -236,10 +236,14 @@ class DeeprouteDataset(Custom3DDataset):
                 obj["heading"] = np.pi/2 - boxes_3d[obj_num, 6].item()
                 object_list.append(obj)
             frame_result['objects'] = object_list
-            save_folder  =  self.root_split + f'/{save_path}/'
+            save_folder = self.root_split + f'/{save_path}/'
             if not os.path.exists(save_folder):
                 os.makedirs(save_folder)
-            save_file = save_folder + self.get_data_info(i)['sample_idx'] + '.txt'
+            if self.get_data_info(i) is None:
+                print(f'no det results: {i + 1}', flush=True)
+                save_file = save_folder + '%05d' % (i + 1) + '.txt'
+            else:
+                save_file = save_folder + self.get_data_info(i)['sample_idx'] + '.txt'
             with open(save_file, 'w', encoding="utf8") as f:
                 json.dump(frame_result, f, indent=4)
 
