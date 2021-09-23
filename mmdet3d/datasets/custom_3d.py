@@ -170,6 +170,9 @@ class Custom3DDataset(Dataset):
         input_dict = self.get_data_info(index)
         self.pre_pipeline(input_dict)
         example = self.pipeline(input_dict)
+        # if index == 10:
+        #     print(example['img_metas'])
+        #     exit()
         return example
 
     @classmethod

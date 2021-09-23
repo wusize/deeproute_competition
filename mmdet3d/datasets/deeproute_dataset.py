@@ -102,13 +102,13 @@ class DeeprouteDataset(Custom3DDataset):
         """
         if self.test_mode and not self.valid_mode:
             mode = 'testing'
-            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))
+            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:10]
         elif self.valid_mode:
             mode = 'training'
-            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[18000:]
+            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[19990:]
         else:
             mode = 'training'
-            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:200]
+            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:10]
         return pcd_list
 
     def get_data_info(self, index):

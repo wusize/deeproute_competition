@@ -103,7 +103,7 @@ class MultiScaleFlipAug3D(object):
                                 data = self.transforms(_results)
                                 aug_data.append(data)
         # list of dict to dict of list
-        aug_data_dict = {key: [] for key in aug_data[0]}
+        aug_data_dict = {key: [] for key in aug_data[0]}    # img_metas, points
         for data in aug_data:
             for key, val in data.items():
                 aug_data_dict[key].append(val)

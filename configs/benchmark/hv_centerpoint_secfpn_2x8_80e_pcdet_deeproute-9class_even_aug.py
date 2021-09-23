@@ -41,7 +41,7 @@ model = dict(
         tasks=[
             dict(num_class=1, class_names=['car', 'van']),
             dict(num_class=3, class_names=['truck', 'big_truck', 'bus']),
-            dict(num_class=2, class_names=['pedestrian','cyclist', 'tricycle', 'cone']),
+            dict(num_class=2, class_names=['pedestrian', 'cyclist', 'tricycle', 'cone']),
         ],
         common_heads=dict(
             reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2)),

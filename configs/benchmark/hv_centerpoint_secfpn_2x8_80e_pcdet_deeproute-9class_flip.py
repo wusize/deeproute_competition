@@ -192,17 +192,16 @@ test_pipeline = [
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
         pts_scale_ratio=1,
-        # flip=False,
         flip=True,
-        pcd_horizontal_flip=True,
-        pcd_vertical_flip=True,
+        # pcd_horizontal_flip=True,
+        # pcd_vertical_flip=True,
         transforms=[
             dict(
                 type='GlobalRotScaleTrans',
                 rot_range=[0, 0],
                 scale_ratio_range=[1., 1.],
                 translation_std=[0, 0, 0]),
-            dict(type='RandomFlip3D'),
+            dict(type='RandomFlip3D', sync_2d=False),
             dict(
                 type='PointsRangeFilter', point_cloud_range=point_cloud_range),
             dict(
