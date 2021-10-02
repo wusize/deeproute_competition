@@ -2,13 +2,13 @@
 
 set -x
 
-PARTITION=Pose
-JOB_NAME=dr
-CONFIG=configs/benchmark/hv_pointpillars_secfpn_4x8_80e_pcdet_deeproute-9class.py
-WORK_DIR=dr_0831
-GPUS=${GPUS:-32}
+PARTITION=$1
+JOB_NAME=$2
+CONFIG=$3
+WORK_DIR=$4
+GPUS=${GPUS:-8}
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
-CPUS_PER_TASK=${CPUS_PER_TASK:-2}
+CPUS_PER_TASK=${CPUS_PER_TASK:-5}
 SRUN_ARGS=${SRUN_ARGS:-""}
 PY_ARGS=${@:5}
 

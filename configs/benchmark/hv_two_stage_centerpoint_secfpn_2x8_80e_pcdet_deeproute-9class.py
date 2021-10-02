@@ -1,6 +1,68 @@
 # model settings
 point_cloud_range = [-80, -80, -5, 80, 80, 3]   # x y z x y z
-voxel_size = [0.1, 0.1, 0.2] # x y z 
+voxel_size = [0.1, 0.1, 0.2] # x y z
+
+first_stage_cfg = dict(
+    type='CenterHead',
+    in_channels=sum([256, 256]),
+    tasks=[
+        dict(num_class=1, class_names=['car', 'van']),
+        dict(num_class=3, class_names=['truck', 'big_truck', 'bus']),
+        dict(num_class=2, class_names=['pedestrian', 'cyclist', 'tricycle', 'cone']),
+    ],
+    common_heads=dict(
+        reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2)),
+    share_conv_channel=64,
+    bbox_coder=dict(
+        type='CenterPointBBoxCoder',
+        pc_range=point_cloud_range[:2],
+        post_center_range=[-80, -80, -10.0, 80, 80, 10.0],
+        max_num=500,
+        score_threshold=0.1,
+        out_size_factor=8,
+        voxel_size=voxel_size[:2],
+        code_size=7),
+    separate_head=dict(
+        type='SeparateHead', init_bias=-2.19, final_kernel=3),
+    loss_cls=dict(type='GaussianFocalLoss', reduction='mean'),
+    loss_bbox=dict(type='L1Loss', reduction='mean', loss_weight=0.25),
+    norm_bbox=True
+)
+
+roi_head_cfg = dict(
+    type="RoIHead",
+    input_channels=512 * 5,
+    model_cfg=dict(
+        CLASS_AGNOSTIC=True,
+        SHARED_FC=[256, 256],
+        CLS_FC=[256, 256],
+        REG_FC=[256, 256],
+        DP_RATIO=0.3,
+        TARGET_CONFIG=dict(
+            ROI_PER_IMAGE=256,
+            FG_RATIO=0.5,
+            SAMPLE_ROI_BY_EACH_CLASS=True,
+            CLS_SCORE_TYPE='roi_iou',
+            CLS_FG_THRESH=0.75,
+            CLS_BG_THRESH=0.25,
+            CLS_BG_THRESH_LO=0.1,
+            HARD_BG_RATIO=0.8,
+            REG_FG_THRESH=0.55
+        ),
+        LOSS_CONFIG=dict(
+            CLS_LOSS='BinaryCrossEntropy',
+            REG_LOSS='L1',
+            LOSS_WEIGHTS={
+                'rcnn_cls_weight': 1.0,
+                'rcnn_reg_weight': 1.0,
+                'code_weights': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            }
+        )
+    ),
+    code_size=7
+),
+
+
 model = dict(
     type='CenterPoint',
     pts_voxel_layer=dict(
@@ -36,30 +98,12 @@ model = dict(
         use_conv_for_no_stride=True
         ),
     pts_bbox_head=dict(
-        type='CenterHead',
-        in_channels=sum([256, 256]),
-        tasks=[
-            dict(num_class=1, class_names=['car', 'van']),
-            dict(num_class=3, class_names=['truck', 'big_truck', 'bus']),
-            dict(num_class=2, class_names=['pedestrian', 'cyclist', 'tricycle', 'cone']),
-        ],
-        common_heads=dict(
-            reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2)),
-        share_conv_channel=64,
-        bbox_coder=dict(
-            type='CenterPointBBoxCoder',
-            pc_range=point_cloud_range[:2],
-            post_center_range=[-80, -80, -10.0, 80, 80, 10.0],
-            max_num=500,
-            score_threshold=0.1,
-            out_size_factor=8,
-            voxel_size=voxel_size[:2],
-            code_size=7),
-        separate_head=dict(
-            type='SeparateHead', init_bias=-2.19, final_kernel=3),
-        loss_cls=dict(type='GaussianFocalLoss', reduction='mean'),
-        loss_bbox=dict(type='L1Loss', reduction='mean', loss_weight=0.25),
-        norm_bbox=True,
+        type='TwoStageCenterHead',
+        first_stage_cfg=first_stage_cfg,
+        roi_head_cfg=roi_head_cfg,
+        num_points=5,
+        loss_weights=[0, 1.0],
+        end2end=False,
         ),
     # model training and testing settings
     train_cfg=dict(
