@@ -10,6 +10,30 @@ first_stage_cfg = dict(
         dict(num_class=3, class_names=['truck', 'big_truck', 'bus']),
         dict(num_class=2, class_names=['pedestrian', 'cyclist', 'tricycle', 'cone']),
     ],
+    train_cfg=dict(
+            grid_size=[1600, 1600, 40],
+            voxel_size=voxel_size,
+            out_size_factor=8,
+            dense_reg=1,
+            gaussian_overlap=0.1,
+            max_objs=500,
+            min_radius=2,
+            code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            point_cloud_range=point_cloud_range),
+    test_cfg=dict(
+            post_center_limit_range=[-80, -80, -10.0, 80, 80, 10.0],
+            max_per_img=500,
+            max_pool_nms=False,
+            min_radius=[4, 12, 3, 1],
+            score_threshold=0.1,
+            out_size_factor=8,
+            voxel_size=voxel_size[:2],
+            nms_type='rotate',
+            pre_max_size=1000,
+            post_max_size=83,
+            nms_thr=0.2,
+            pc_range=point_cloud_range[:2]
+            ),
     common_heads=dict(
         reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2)),
     share_conv_channel=64,
@@ -60,7 +84,7 @@ roi_head_cfg = dict(
         )
     ),
     code_size=7
-),
+)
 
 
 model = dict(
@@ -104,6 +128,7 @@ model = dict(
         num_points=5,
         loss_weights=[0, 1.0],
         end2end=False,
+        freeze=False,
         ),
     # model training and testing settings
     train_cfg=dict(
@@ -258,7 +283,7 @@ momentum_config = dict(
     cyclic_times=1,
     step_ratio_up=0.4)
 checkpoint_config = dict(interval=1)
-evaluation = dict(interval=100, pipeline=test_pipeline)
+evaluation = dict(interval=1, pipeline=test_pipeline)
 # yapf:disable
 log_config = dict(
     interval=50,
@@ -271,7 +296,7 @@ log_config = dict(
 runner = dict(type='EpochBasedRunner', max_epochs=80)
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/base_line'
-load_from = None  # './models/centerpoint.pth'
+work_dir = './work_dirs/two_stage'
+load_from = './checkpoints/pretrained_for_two_stage.pth'  # './models/centerpoint.pth'
 resume_from = None  # './work_dirs/data_aug/latest.pth'
 workflow = [('train', 1)]

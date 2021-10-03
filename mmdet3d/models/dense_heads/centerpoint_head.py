@@ -905,7 +905,7 @@ class CenterHead(BaseModule):
         roi_features = boxes[0]['bev_features'].new_zeros((batch_size,
                                                            max_objs,
                                                            feature_vector_length))
-
+        example = {}
         for i in range(batch_size):
             num_objs =  boxes[i]['bev_features'].shape[0]
             num_objs = min(num_objs, max_objs)
@@ -914,14 +914,15 @@ class CenterHead(BaseModule):
 
             box_preds = boxes[i]['bbox'].tensor
 
-            if self.roi_head.code_size == 9:
+            if self.bbox_coder.code_size == 9:
                 # x, y, z, w, l, h, rotation_y, velocity_x, velocity_y
                 box_preds = box_preds[:, [0, 1, 2, 3, 4, 5, 8, 6, 7]]
 
             rois[i, :num_objs] = box_preds[:num_objs]
             roi_labels[i, :num_objs] = boxes[i]['labels'][:num_objs] + 1
             roi_scores[i, :num_objs] = boxes[i]['scores'][:num_objs]
-            roi_features[i, :num_objs] = boxes[i]['bev_features'].view(num_objs, -1)
+            roi_features[i, :num_objs] = boxes[i]['bev_features'][:num_objs
+                                         ].contiguous().view(num_objs, -1)
 
         example['rois'] = rois
         example['roi_labels'] = roi_labels
@@ -943,24 +944,31 @@ class TwoStageCenterHead(BaseModule):
                  first_stage_cfg,
                  roi_head_cfg,
                  num_points=5,
+                 train_cfg=None,
+                 test_cfg=None,
                  loss_weights=[0, 1.0],
+                 freeze=True,
                  end2end=False,
                  init_cfg=None):
         assert init_cfg is None, 'To prevent abnormal initialization ' \
             'behavior, init_cfg is not allowed to be set'
-        super(CenterHead, self).__init__(init_cfg=init_cfg)
+        super(TwoStageCenterHead, self).__init__(init_cfg=init_cfg)
+        if end2end:
+            assert not freeze
 
         self.first_stage = builder.build_head(first_stage_cfg)
         self.roi_head = external_builder.build_roi_head(roi_head_cfg)
         self.end2end = end2end
+        self.freeze = freeze
         self.num_points = num_points
         self.loss_weights=loss_weights
 
     def forward(self, pts_feats):
-        outs = self.first_stage(pts_feats)
-        # merge multi_level features
-        pts_feats = torch.cat([pts_feats], dim=1)
-
+        if self.freeze:
+            with torch.no_grad():
+                outs = self.first_stage(pts_feats)
+        else:
+            outs = self.first_stage(pts_feats)
         for task_outs in outs:
             for level_task_outs, level_pts_feats in zip(task_outs, pts_feats):
                 level_task_outs['bev_feature'] = level_pts_feats
@@ -969,15 +977,15 @@ class TwoStageCenterHead(BaseModule):
 
     def get_bboxes(self, preds_dicts, img_metas, img=None, rescale=False):
         first_stage_bboxs = self.first_stage.get_bboxes(preds_dicts, img_metas)
-        for batch_idx in range(len(bboxs)):
-            tmp = {'bbox': bboxs[batch_idx][0], 'scores': bboxs[batch_idx][1],
-                   'labels': bboxs[batch_idx][2]}
+        for batch_idx in range(len(first_stage_bboxs)):
+            tmp = {'bbox': first_stage_bboxs[batch_idx][0], 'scores': first_stage_bboxs[batch_idx][1],
+                   'labels': first_stage_bboxs[batch_idx][2]}
             first_stage_bboxs[batch_idx] = tmp
 
         _ = multi_apply(self.first_stage.get_single_batch_sample_points,
                         first_stage_bboxs,
                         [self.num_points for _ in first_stage_bboxs])
-        bev_features = torch.cat([pred_dict['bev_features']
+        bev_features = torch.cat([pred_dict['bev_feature']
                                   for pred_dict in preds_dicts[0]], dim=1)
         _ = multi_apply(self.first_stage.get_single_bev_features,
                         first_stage_bboxs,
@@ -985,7 +993,7 @@ class TwoStageCenterHead(BaseModule):
 
         batched_rois = self.first_stage.prepare_batched_rois(first_stage_bboxs)
 
-        return self.foward_second_stage(batched_rois)
+        return self.forward_second_stage(batched_rois, img_metas)
 
     @force_fp32(apply_to=('preds_dicts'))
     def loss(self, gt_bboxes_3d, gt_labels_3d, preds_dicts, img_metas, **kwargs):
@@ -994,35 +1002,35 @@ class TwoStageCenterHead(BaseModule):
         for k in first_stage_losses.keys():
             first_stage_losses[k] = first_stage_losses[k] * self.loss_weights[0]
         first_stage_bboxs = self.first_stage.get_bboxes(preds_dicts, img_metas)
-        for batch_idx in range(len(bboxs)):
-            tmp = {'bbox': bboxs[batch_idx][0], 'scores': bboxs[batch_idx][1],
-                   'labels': bboxs[batch_idx][2]}
+        for batch_idx in range(len(first_stage_bboxs)):
+            tmp = {'bbox': first_stage_bboxs[batch_idx][0], 'scores': first_stage_bboxs[batch_idx][1],
+                   'labels': first_stage_bboxs[batch_idx][2]}
             first_stage_bboxs[batch_idx] = tmp
 
         _ = multi_apply(self.first_stage.get_single_batch_sample_points,
                         first_stage_bboxs,
                         [self.num_points for _ in first_stage_bboxs])
-        bev_features = torch.cat([pred_dict['bev_features']
+        bev_features = torch.cat([pred_dict['bev_feature']
                                   for pred_dict in preds_dicts[0]], dim=1)
         _ = multi_apply(self.first_stage.get_single_bev_features,
                         first_stage_bboxs,
                         list(bev_features))
 
         batched_rois = self.first_stage.prepare_batched_rois(first_stage_bboxs)
-        batched_rois = self.add_gt_bbox(batched_rois,
-                                        gt_bboxes_3d, gt_labels_3d)
+        batched_rois = self.add_gt_boxes(batched_rois,
+                                         gt_bboxes_3d, gt_labels_3d)
 
-        second_stage_losses = self.forward_second_stage(batched_rois,
-                                                        first_stage_bboxs, img_metas)
-
+        second_stage_losses = self.forward_second_stage(batched_rois, img_metas)
+        # print(first_stage_losses, second_stage_losses, flush=True)
         for k in second_stage_losses.keys():
             second_stage_losses[k] = second_stage_losses[k] * self.loss_weights[1]
 
-        return first_stage_losses.update(second_stage_losses)
+        second_stage_losses.update(first_stage_losses)
+
+        return second_stage_losses
 
     def add_gt_boxes(self, batched_rois, gt_bboxes_3d, gt_labels_3d):
-        batch_size = len(gt_labels_3d)
-        batch_size, num_objs, box_length = batched_rois['rois']
+        batch_size, num_objs, box_length = batched_rois['rois'].shape
         gt_boxes_and_cls = batched_rois['rois'].new_zeros(batch_size, num_objs, box_length + 1)
 
         for batch_idx in range(batch_size):
@@ -1036,9 +1044,11 @@ class TwoStageCenterHead(BaseModule):
 
         return batched_rois
 
-    def forward_second_stage(self, batched_rois, bboxs=None, img_metas=None):
+    def forward_second_stage(self, batched_rois, img_metas=None):
         if not self.end2end:
             for k, v in batched_rois.items():
+                if not isinstance(v, torch.Tensor):
+                    continue
                 if v.requires_grad:
                     batched_rois[k] = v.detach()
 
