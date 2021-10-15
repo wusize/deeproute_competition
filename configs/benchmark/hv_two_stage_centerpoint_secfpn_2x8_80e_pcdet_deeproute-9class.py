@@ -71,7 +71,7 @@ roi_head_cfg = dict(
             CLS_BG_THRESH=0.25,
             CLS_BG_THRESH_LO=0.1,
             HARD_BG_RATIO=0.8,
-            REG_FG_THRESH=0.55
+            REG_FG_THRESH=0.3
         ),
         LOSS_CONFIG=dict(
             CLS_LOSS='BinaryCrossEntropy',
@@ -230,7 +230,7 @@ eval_pipeline = [
 
 data = dict(
     samples_per_gpu=1,
-    workers_per_gpu=2,
+    workers_per_gpu=1,
     train=dict(
         type=dataset_type,
         data_root=data_root,
@@ -283,7 +283,7 @@ momentum_config = dict(
     cyclic_times=1,
     step_ratio_up=0.4)
 checkpoint_config = dict(interval=1)
-evaluation = dict(interval=1, pipeline=test_pipeline)
+evaluation = dict(interval=2, pipeline=test_pipeline)
 # yapf:disable
 log_config = dict(
     interval=50,
@@ -293,7 +293,7 @@ log_config = dict(
     ])
 # yapf:enable
 # runtime settings
-runner = dict(type='EpochBasedRunner', max_epochs=80)
+runner = dict(type='EpochBasedRunner', max_epochs=10)
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = './work_dirs/two_stage'

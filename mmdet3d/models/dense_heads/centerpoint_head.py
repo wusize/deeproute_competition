@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 from mmcv.cnn import ConvModule, build_conv_layer
 from mmcv.runner import BaseModule, force_fp32
+from mmcv.ops import RoIAlignRotated
 from torch import nn
 
 from mmdet3d.core import (circle_nms, draw_heatmap_gaussian, gaussian_radius,
@@ -289,6 +290,7 @@ class CenterHead(BaseModule):
                  norm_cfg=dict(type='BN2d'),
                  bias='auto',
                  norm_bbox=True,
+                 roi_align=None,
                  init_cfg=None):
         assert init_cfg is None, 'To prevent abnormal initialization ' \
             'behavior, init_cfg is not allowed to be set'
@@ -326,6 +328,12 @@ class CenterHead(BaseModule):
             separate_head.update(
                 in_channels=share_conv_channel, heads=heads, num_cls=num_cls)
             self.task_heads.append(builder.build_head(separate_head))
+
+        if roi_align is not None:
+            # print(roi_align, flush=True)
+            self.roi_align = RoIAlignRotated(**roi_align)
+        else:
+            self.roi_align = None
 
     def forward_single(self, x):
         """Forward function for CenterPoint.
@@ -777,6 +785,9 @@ class CenterHead(BaseModule):
                     thresh=self.test_cfg['nms_thr'],
                     pre_maxsize=self.test_cfg['pre_max_size'],
                     post_max_size=self.test_cfg['post_max_size'])
+
+                print(len(top_scores), len(selected), flush=True)
+
             else:
                 selected = []
 
@@ -832,6 +843,7 @@ class CenterHead(BaseModule):
             points
         """
         top_center = box['bbox'].corners[:, [1, 2, 5, 6]].mean(1)
+        # print(torch.tan(box['bbox'].tensor[0, -1]), flush=True)
         if num_point == 1:
             points = top_center.view(-1, 1, 3)
 
@@ -848,7 +860,9 @@ class CenterHead(BaseModule):
             points[:, 2] = back_middle
             points[:, 3] = left_middle
             points[:, 4] = right_middle
-
+            # vector = top_center[0] - left_middle[0]
+            # print(vector[0] / vector[1], flush=True)
+            # exit()
         else:
             raise NotImplementedError()
         box['sample_points'] = points
@@ -878,16 +892,92 @@ class CenterHead(BaseModule):
         sample_points_2d[:, :, 1] = (
                                             sample_points_2d[:, :, 1] - pc_range[1]
                                     ) / voxel_size[1] / out_size_factor
-        sample_points_2d = sample_points_2d.flip([-1]).view(1, 1, -1, 2)
+        # sample_points_2d = sample_points_2d.flip([-1]).view(1, 1, -1, 2)
+        sample_points_2d = sample_points_2d.view(1, 1, -1, 2)
+
+        #
+        # x_0 = sample_points_2d[0, 0, 0, 0].long().item()
+        # y_0 = sample_points_2d[0, 0, 0, 1].long().item()
+        # x_1 = (sample_points_2d[0, 0, 0, 0] + 0.5).long().item()
+        # y_1 = (sample_points_2d[0, 0, 0, 1] + 0.5).long().item()
+        _, h, w, _ = pts_feat.shape
+        sample_points_2d[:, :, 0] = sample_points_2d[:, :, 0] * 2 / (w - 1) - 1.0
+        sample_points_2d[:, :, 1] = sample_points_2d[:, :, 1] * 2 / (h - 1) - 1.0
+        # print(x_0, x_1, y_0, y_1, flush=True)
+
+        # pts_feat[0, 0, y_0, x_0] = 9999.0
+        # pts_feat[0, 0, y_0, x_1] = 9999.0
+        # pts_feat[0, 0, y_1, x_0] = 9999.0
+        # pts_feat[0, 0, y_1, x_1] = 9999.0
 
         sampled_features = F.grid_sample(pts_feat, sample_points_2d,
                                          align_corners=True)    # 1, C, 1, num_objs*num_samples
-
+        # print(sample_points_2d[0, 0, 0], sampled_features[0, 0, 0, 0], flush=True)
+        #
+        # print(pts_feat[0, 0, y_0, x_0], pts_feat[0, 0, y_0, x_1],
+        #       pts_feat[0, 0, y_1, x_0], pts_feat[0, 0, y_1, x_1], flush=True)
+        #
+        #
+        # exit()
         sampled_features = sampled_features[0, :, 0].T.view(num_objs,
                                                             num_samples, -1)
         box['bev_features'] = sampled_features
 
         return sampled_features
+
+    def get_single_roi_aligned_features(self, box, pts_feat):
+        """
+        Args:
+            box dict: Decoded bboxs, scores, labels and sample_points
+            pts_feat tensor: (1, 512, 200, 200)
+        Returns:
+            box dict: Decoded bboxs, scores, labels, sample_points and bev_features
+        """
+        if pts_feat.dim() == 3:
+            pts_feat = pts_feat[None]
+        pc_range = self.train_cfg['point_cloud_range']
+        voxel_size = self.train_cfg['voxel_size']
+        out_size_factor = self.train_cfg['out_size_factor']
+
+        bev = box['bbox'].bev  # num_objs, 5 x, y, w, h, yaw
+
+        num_objs = bev.shape[0]
+
+        rois = bev.new_zeros(num_objs, 6)
+
+        rois[:, 1] = (
+                             bev[:, 0] - pc_range[0]
+                     ) / voxel_size[0] / out_size_factor
+
+        rois[:, 2] = (
+                             bev[:, 1] - pc_range[1]
+                     ) / voxel_size[1] / out_size_factor
+
+        rois[:, 3] = (
+                         bev[:, 2]
+                     ) / voxel_size[0] / out_size_factor
+
+        rois[:, 4] = (
+                         bev[:, 3]
+                     ) / voxel_size[1] / out_size_factor
+
+        rois[:, 5] = bev[:, 4]
+
+
+        roi_ailgned_features = self.roi_align(pts_feat, rois)
+
+        roi_ailgned_features = roi_ailgned_features.view(num_objs,
+                                                         pts_feat.shape[1],
+                                                         -1)
+        # print(rois[0], flush=True)
+        # print(roi_ailgned_features[0, 0], flush=True)
+
+        roi_ailgned_features = roi_ailgned_features.permute(0, 2, 1)
+
+        box['bev_features'] = roi_ailgned_features
+
+        return roi_ailgned_features
+
 
     def prepare_batched_rois(self, boxes):
         batch_size = len(boxes)
@@ -958,6 +1048,7 @@ class TwoStageCenterHead(BaseModule):
 
         self.first_stage = builder.build_head(first_stage_cfg)
         self.roi_head = external_builder.build_roi_head(roi_head_cfg)
+        self.roi_head_cfg = roi_head_cfg
         self.end2end = end2end
         self.freeze = freeze
         self.num_points = num_points
@@ -981,15 +1072,21 @@ class TwoStageCenterHead(BaseModule):
             tmp = {'bbox': first_stage_bboxs[batch_idx][0], 'scores': first_stage_bboxs[batch_idx][1],
                    'labels': first_stage_bboxs[batch_idx][2]}
             first_stage_bboxs[batch_idx] = tmp
-
-        _ = multi_apply(self.first_stage.get_single_batch_sample_points,
-                        first_stage_bboxs,
-                        [self.num_points for _ in first_stage_bboxs])
         bev_features = torch.cat([pred_dict['bev_feature']
                                   for pred_dict in preds_dicts[0]], dim=1)
-        _ = multi_apply(self.first_stage.get_single_bev_features,
-                        first_stage_bboxs,
-                        list(bev_features))
+        if self.first_stage.roi_align is None:
+            _ = multi_apply(self.first_stage.get_single_batch_sample_points,
+                            first_stage_bboxs,
+                            [self.num_points for _ in first_stage_bboxs])
+            _ = multi_apply(self.first_stage.get_single_bev_features,
+                            first_stage_bboxs,
+                            list(bev_features))
+        else:
+            _ = multi_apply(self.first_stage.get_single_roi_aligned_features,
+                            first_stage_bboxs,
+                            list(bev_features))
+
+        exit()
 
         batched_rois = self.first_stage.prepare_batched_rois(first_stage_bboxs)
 
@@ -1007,14 +1104,20 @@ class TwoStageCenterHead(BaseModule):
                    'labels': first_stage_bboxs[batch_idx][2]}
             first_stage_bboxs[batch_idx] = tmp
 
-        _ = multi_apply(self.first_stage.get_single_batch_sample_points,
-                        first_stage_bboxs,
-                        [self.num_points for _ in first_stage_bboxs])
         bev_features = torch.cat([pred_dict['bev_feature']
                                   for pred_dict in preds_dicts[0]], dim=1)
-        _ = multi_apply(self.first_stage.get_single_bev_features,
-                        first_stage_bboxs,
-                        list(bev_features))
+        if self.first_stage.roi_align is None:
+            _ = multi_apply(self.first_stage.get_single_batch_sample_points,
+                            first_stage_bboxs,
+                            [self.num_points for _ in first_stage_bboxs])
+            _ = multi_apply(self.first_stage.get_single_bev_features,
+                            first_stage_bboxs,
+                            list(bev_features))
+        else:
+            _ = multi_apply(self.first_stage.get_single_roi_aligned_features,
+                            first_stage_bboxs,
+                            list(bev_features))
+
 
         batched_rois = self.first_stage.prepare_batched_rois(first_stage_bboxs)
         batched_rois = self.add_gt_boxes(batched_rois,
@@ -1035,8 +1138,13 @@ class TwoStageCenterHead(BaseModule):
 
         for batch_idx in range(batch_size):
             valid_num = min(num_objs, len(gt_bboxes_3d[batch_idx]))
+            rot = gt_bboxes_3d[batch_idx].tensor[:valid_num, 6]
+            rot_sin = torch.sin(rot)
+            rot_cos = torch.cos(rot)
+            rot_aligned = torch.atan2(rot_sin, rot_cos)
             gt_boxes_and_cls[batch_idx, :valid_num, :box_length] \
                 = gt_bboxes_3d[batch_idx].tensor[:valid_num]
+            gt_boxes_and_cls[batch_idx, :valid_num, 6] = rot_aligned
             gt_boxes_and_cls[batch_idx, :valid_num, -1] \
                 = gt_labels_3d[batch_idx][:valid_num].float() + 1.0
 
@@ -1081,9 +1189,14 @@ class TwoStageCenterHead(BaseModule):
             if box_preds.shape[-1] == 9:
                 # move rotation to the end (the create submission file will take elements from 0:6 and -1)
                 box_preds = box_preds[:, [0, 1, 2, 3, 4, 5, 7, 8, 6]]
-
-            scores = torch.sqrt(torch.sigmoid(cls_preds).reshape(-1)
-                                * batch_dict['roi_scores'][batch_idx].reshape(-1))
+            if self.roi_head_cfg['model_cfg']['LOSS_CONFIG']['CLS_LOSS'] == 'MSE':
+                scores = torch.sqrt(cls_preds.reshape(-1)
+                                    * batch_dict['roi_scores'][batch_idx].reshape(-1))
+            else:
+                scores = torch.sqrt(torch.sigmoid(cls_preds).reshape(-1)
+                                   * batch_dict['roi_scores'][batch_idx].reshape(-1))
+                # scores = torch.sqrt(batch_dict['roi_scores'][batch_idx].reshape(-1)
+                #                    * batch_dict['roi_scores'][batch_idx].reshape(-1))
             mask = (label_preds != 0).view(-1)
 
             box_preds = box_preds[mask, :]

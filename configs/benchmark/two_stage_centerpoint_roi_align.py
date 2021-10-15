@@ -1,6 +1,95 @@
 # model settings
 point_cloud_range = [-80, -80, -5, 80, 80, 3]   # x y z x y z
-voxel_size = [0.1, 0.1, 0.2] # x y z 
+voxel_size = [0.1, 0.1, 0.2] # x y z
+
+first_stage_cfg = dict(
+    type='CenterHead',
+    in_channels=sum([256, 256]),
+    tasks=[
+        dict(num_class=1, class_names=['car', 'van']),
+        dict(num_class=3, class_names=['truck', 'big_truck', 'bus']),
+        dict(num_class=2, class_names=['pedestrian', 'cyclist', 'tricycle', 'cone']),
+    ],
+    train_cfg=dict(
+            grid_size=[1600, 1600, 40],
+            voxel_size=voxel_size,
+            out_size_factor=8,
+            dense_reg=1,
+            gaussian_overlap=0.1,
+            max_objs=500,
+            min_radius=2,
+            code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            point_cloud_range=point_cloud_range),
+    test_cfg=dict(
+            post_center_limit_range=[-80, -80, -10.0, 80, 80, 10.0],
+            max_per_img=500,
+            max_pool_nms=False,
+            min_radius=[4, 12, 3, 1],
+            score_threshold=0.1,
+            out_size_factor=8,
+            voxel_size=voxel_size[:2],
+            nms_type='rotate',
+            pre_max_size=1000,
+            post_max_size=83,
+            nms_thr=0.2,
+            pc_range=point_cloud_range[:2]
+            ),
+    common_heads=dict(
+        reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2)),
+    share_conv_channel=64,
+    bbox_coder=dict(
+        type='CenterPointBBoxCoder',
+        pc_range=point_cloud_range[:2],
+        post_center_range=[-80, -80, -10.0, 80, 80, 10.0],
+        max_num=500,
+        score_threshold=0.1,
+        out_size_factor=8,
+        voxel_size=voxel_size[:2],
+        code_size=7),
+    separate_head=dict(
+        type='SeparateHead', init_bias=-2.19, final_kernel=3),
+    loss_cls=dict(type='GaussianFocalLoss', reduction='mean'),
+    loss_bbox=dict(type='L1Loss', reduction='mean', loss_weight=0.25),
+    norm_bbox=True,
+    roi_align=dict(out_size=(4, 4),
+                   spatial_scale=1.0,
+                   )
+)
+
+roi_head_cfg = dict(
+    type="RoIHead",
+    input_channels=512 * 16,
+    model_cfg=dict(
+        CLASS_AGNOSTIC=True,
+        SHARED_FC=[512, 512],
+        CLS_FC=[512, 512],
+        REG_FC=[512, 512],
+        DP_RATIO=0.3,
+        TARGET_CONFIG=dict(
+            ROI_PER_IMAGE=32,
+            FG_RATIO=0.5,
+            SAMPLE_ROI_BY_EACH_CLASS=True,
+            CLS_SCORE_TYPE='roi_iou',
+            CLS_FG_THRESH=0.75,
+            CLS_BG_THRESH=0.25,
+            CLS_BG_THRESH_LO=0.1,
+            HARD_BG_RATIO=0.8,
+            REG_FG_THRESH=0.55
+        ),
+        LOSS_CONFIG=dict(
+            CLS_LOSS='BinaryCrossEntropy',
+            REG_LOSS='L1',
+            LOSS_WEIGHTS={
+                'rcnn_cls_weight': 1.0,
+                'rcnn_reg_weight': 1.0,
+                'code_weights': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            }
+        )
+    ),
+    code_size=7
+)
+
+
 model = dict(
     type='CenterPoint',
     pts_voxel_layer=dict(
@@ -36,30 +125,13 @@ model = dict(
         use_conv_for_no_stride=True
         ),
     pts_bbox_head=dict(
-        type='CenterHead',
-        in_channels=sum([256, 256]),
-        tasks=[
-            dict(num_class=1, class_names=['car', 'van']),
-            dict(num_class=3, class_names=['truck', 'big_truck', 'bus']),
-            dict(num_class=2, class_names=['pedestrian', 'cyclist', 'tricycle', 'cone']),
-        ],
-        common_heads=dict(
-            reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2)),
-        share_conv_channel=64,
-        bbox_coder=dict(
-            type='CenterPointBBoxCoder',
-            pc_range=point_cloud_range[:2],
-            post_center_range=[-80, -80, -10.0, 80, 80, 10.0],
-            max_num=500,
-            score_threshold=0.1,
-            out_size_factor=8,
-            voxel_size=voxel_size[:2],
-            code_size=7),
-        separate_head=dict(
-            type='SeparateHead', init_bias=-2.19, final_kernel=3),
-        loss_cls=dict(type='GaussianFocalLoss', reduction='mean'),
-        loss_bbox=dict(type='L1Loss', reduction='mean', loss_weight=0.25),
-        norm_bbox=True,
+        type='TwoStageCenterHead',
+        first_stage_cfg=first_stage_cfg,
+        roi_head_cfg=roi_head_cfg,
+        num_points=5,
+        loss_weights=[1.0, 0.1],
+        end2end=True,
+        freeze=False,
         ),
     # model training and testing settings
     train_cfg=dict(
@@ -160,7 +232,7 @@ eval_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=2,
     workers_per_gpu=1,
     train=dict(
         type=dataset_type,
@@ -205,7 +277,7 @@ optimizer_config = dict(grad_clip=dict(max_norm=10, norm_type=2))
 # learning policy
 lr_config = dict(
     policy='cyclic',
-    target_ratio=(10, 1e-4),
+    target_ratio=(3.3, 0.33),
     cyclic_times=1,
     step_ratio_up=0.4)
 momentum_config = dict(
@@ -214,7 +286,7 @@ momentum_config = dict(
     cyclic_times=1,
     step_ratio_up=0.4)
 checkpoint_config = dict(interval=1)
-evaluation = dict(interval=100, pipeline=test_pipeline)
+evaluation = dict(interval=1, pipeline=test_pipeline)
 # yapf:disable
 log_config = dict(
     interval=50,
@@ -224,10 +296,10 @@ log_config = dict(
     ])
 # yapf:enable
 # runtime settings
-runner = dict(type='EpochBasedRunner', max_epochs=80)
+runner = dict(type='EpochBasedRunner', max_epochs=10)
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/base_line'
-load_from = None  # './models/centerpoint.pth'
+work_dir = './work_dirs/two_stage_roi_align'
+load_from = './checkpoints/pretrained_for_two_stage.pth'  # './models/centerpoint.pth'
 resume_from = None  # './work_dirs/data_aug/latest.pth'
 workflow = [('train', 1)]

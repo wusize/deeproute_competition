@@ -88,8 +88,8 @@ model = dict(
             post_max_size=83,
             nms_thr=0.2,
             pc_range=point_cloud_range[:2],
-            # use_rotate_nms=True,
-            # max_num=83,
+            use_rotate_nms=True,
+            max_num=83,
             ),
         )
 )
@@ -192,16 +192,17 @@ test_pipeline = [
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
         pts_scale_ratio=1,
+        # pts_scale_ratio=[0.95, 1.0, 1.05],
         flip=True,
-        # pcd_horizontal_flip=True,
-        # pcd_vertical_flip=True,
+        pcd_horizontal_flip=True,
+        pcd_vertical_flip=True,
         transforms=[
             dict(
                 type='GlobalRotScaleTrans',
                 rot_range=[0, 0],
                 scale_ratio_range=[1., 1.],
                 translation_std=[0, 0, 0]),
-            dict(type='RandomFlip3D', sync_2d=False),
+            dict(type='RandomFlip3D', sync_2d=True),
             dict(
                 type='PointsRangeFilter', point_cloud_range=point_cloud_range),
             dict(

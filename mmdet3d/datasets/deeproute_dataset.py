@@ -102,13 +102,13 @@ class DeeprouteDataset(Custom3DDataset):
         """
         if self.test_mode and not self.valid_mode:
             mode = 'testing'
-            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:10]
+            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:100]
         elif self.valid_mode:
             mode = 'training'
             pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[19990:]
         else:
             mode = 'training'
-            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:10]
+            pcd_list = sorted(os.listdir(self.data_root + mode + '/pointcloud'))[:19990]
         return pcd_list
 
     def get_data_info(self, index):
@@ -188,6 +188,7 @@ class DeeprouteDataset(Custom3DDataset):
                 gt_bboxes_3d=gt_bboxes_3d, 
                 gt_labels_3d=gt_labels_3d, 
                 gt_names=gt_names,
+                annos_path=annos_path
                 )
         return anns_results
 
@@ -294,7 +295,8 @@ class DeeprouteDataset(Custom3DDataset):
         #    gt_annos_bbox_noise_['rotation_y'] = gt_annos_bbox_noise_['rotation_y']+0.01
         #    gt_annos_bbox_noise.append(gt_annos_bbox_noise_)
         #prepare dt for eval
-        dt_annos = results            
+        dt_annos = results
+        print(dt_annos[0])
         dt_annos_bbox = self.bbox2result_kitti(dt_annos, self.CLASSES_EVAL)
         ap_result_str, ap_dict = deeproute_eval(gt_annos_bbox, dt_annos_bbox, list(unique_everseen(self.CLASSES_EVAL)))    
         print_log('\n' + ap_result_str, logger=logger)

@@ -1,7 +1,7 @@
 import mmcv
 import warnings
 from copy import deepcopy
-
+import copy
 from mmdet.datasets.builder import PIPELINES
 from mmdet.datasets.pipelines import Compose
 
@@ -36,7 +36,9 @@ class MultiScaleFlipAug3D(object):
                  flip=False,
                  flip_direction='horizontal',
                  pcd_horizontal_flip=False,
-                 pcd_vertical_flip=False):
+                 pcd_vertical_flip=False,
+                 rot_range=[0, 0]):
+        transforms_ = copy.deepcopy(transforms)
         self.transforms = Compose(transforms)
         self.img_scale = img_scale if isinstance(img_scale,
                                                  list) else [img_scale]
@@ -45,6 +47,15 @@ class MultiScaleFlipAug3D(object):
 
         assert mmcv.is_list_of(self.img_scale, tuple)
         assert mmcv.is_list_of(self.pts_scale_ratio, float)
+
+        if rot_range[0] == 0 and rot_range[1] == 0:
+            self.transforms = [self.transforms]
+        else:
+            for transform_ in transforms_:
+                if 'rot_range' in transform_:
+                    transform_.update(rot_range=rot_range)
+            self.transforms = [self.transforms,
+                               Compose(transforms_)]
 
         self.flip = flip
         self.pcd_horizontal_flip = pcd_horizontal_flip
@@ -82,28 +93,31 @@ class MultiScaleFlipAug3D(object):
             if self.flip and self.pcd_horizontal_flip else [False]
         pcd_vertical_flip_aug = [False, True] \
             if self.flip and self.pcd_vertical_flip else [False]
-        for scale in self.img_scale:
-            for pts_scale_ratio in self.pts_scale_ratio:
-                for flip in flip_aug:
-                    for pcd_horizontal_flip in pcd_horizontal_flip_aug:
-                        for pcd_vertical_flip in pcd_vertical_flip_aug:
-                            for direction in self.flip_direction:
-                                # results.copy will cause bug
-                                # since it is shallow copy
-                                _results = deepcopy(results)
-                                _results['scale'] = scale
-                                _results['flip'] = flip
-                                _results['pcd_scale_factor'] = \
-                                    pts_scale_ratio
-                                _results['flip_direction'] = direction
-                                _results['pcd_horizontal_flip'] = \
-                                    pcd_horizontal_flip
-                                _results['pcd_vertical_flip'] = \
-                                    pcd_vertical_flip
-                                data = self.transforms(_results)
-                                aug_data.append(data)
+
+        for transform in self.transforms:
+            for scale in self.img_scale:
+                for pts_scale_ratio in self.pts_scale_ratio:
+                    for flip in flip_aug:
+                        for pcd_horizontal_flip in pcd_horizontal_flip_aug:
+                            for pcd_vertical_flip in pcd_vertical_flip_aug:
+                                for direction in self.flip_direction:
+                                    # results.copy will cause bug
+                                    # since it is shallow copy
+                                    _results = deepcopy(results)
+                                    _results['scale'] = scale
+                                    _results['flip'] = flip
+                                    _results['pcd_scale_factor'] = \
+                                        pts_scale_ratio
+                                    _results['flip_direction'] = direction
+                                    _results['pcd_horizontal_flip'] = \
+                                        pcd_horizontal_flip
+                                    _results['pcd_vertical_flip'] = \
+                                        pcd_vertical_flip
+                                    # data = self.transforms(_results)
+                                    data = transform(_results)
+                                    aug_data.append(data)
         # list of dict to dict of list
-        aug_data_dict = {key: [] for key in aug_data[0]}    # img_metas, points
+        aug_data_dict = {key: [] for key in aug_data[0]}
         for data in aug_data:
             for key, val in data.items():
                 aug_data_dict[key].append(val)

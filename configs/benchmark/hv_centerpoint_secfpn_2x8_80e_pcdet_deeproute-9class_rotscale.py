@@ -85,7 +85,7 @@ model = dict(
             voxel_size=voxel_size[:2],
             nms_type='rotate',
             pre_max_size=1000,
-            post_max_size=83,
+            post_max_size=666,
             nms_thr=0.2,
             pc_range=point_cloud_range[:2],
             # use_rotate_nms=True,
@@ -158,48 +158,21 @@ train_pipeline = [
     dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d']),
 ]
 
-
-# test_pipeline = [
-#     dict(
-#         type='LoadPointsFromFile', coord_type='LIDAR', load_dim=4, use_dim=4),
-#     dict(
-#         type='MultiScaleFlipAug3D',
-#         img_scale=(1333, 800),
-#         pts_scale_ratio=[0.95, 1.0, 1.05],
-#         flip=True,
-#         pcd_horizontal_flip=True,
-#         pcd_vertical_flip=True,
-#         transforms=[
-#             dict(
-#                 type='GlobalRotScaleTrans',
-#                 rot_range=[0, 0],
-#                 scale_ratio_range=[1., 1.],
-#                 translation_std=[0, 0, 0]),
-#             dict(type='RandomFlip3D', sync_2d=False),
-#             dict(
-#                 type='PointsRangeFilter', point_cloud_range=point_cloud_range),
-#             dict(
-#                 type='DefaultFormatBundle3D',
-#                 class_names=class_names,
-#                 with_label=False),
-#             dict(type='Collect3D', keys=['points'])
-#         ])
-# ]
-
 test_pipeline = [
     dict(type='LoadPointsFromFile', coord_type='LIDAR', load_dim=4, use_dim=4),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
         pts_scale_ratio=1,
-        flip=True,
+        flip=False,
+        # rot_range=[-0.78539816, 0.78539816],
         transforms=[
             dict(
                 type='GlobalRotScaleTrans',
                 # rot_range=[-0.78539816, 0.78539816],
-                #rot_range=[-0, 0],
+                rot_range=[-0, 0],
                 # scale_ratio_range=[0.95, 1.05],
-                # scale_ratio_range=[1.0, 1.0],
+                scale_ratio_range=[1.0, 1.0],
                 translation_std=[0, 0, 0]),
             dict(type='RandomFlip3D'),
             dict(
@@ -208,7 +181,7 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points'])
+            dict(type='Collect3D', keys=['points'], )
         ])
 ]
 # construct a pipeline for data and gt loading in show function

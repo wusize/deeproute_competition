@@ -5,6 +5,88 @@ from mmdet.models import DETECTORS
 from .mvx_two_stage import MVXTwoStageDetector
 from mmdet.core import multi_apply
 
+
+import numpy as np
+
+import torch
+import cv2
+
+
+def get_3rd_point(a, b):
+    direct = a - b
+    return np.array(b) + np.array([-direct[1], direct[0]], dtype=np.float32)
+
+
+def get_dir(src_point, rot_rad):
+    sn, cs = np.sin(rot_rad), np.cos(rot_rad)
+
+    src_result = [0, 0]
+    src_result[0] = src_point[0] * cs - src_point[1] * sn
+    src_result[1] = src_point[0] * sn + src_point[1] * cs
+
+    return src_result
+
+
+def get_affine_transform(center,
+                         scale,
+                         rot_rad,
+                         output_size,
+                         shift=np.array([0, 0], dtype=np.float32),
+                         inv=0):
+    if isinstance(scale, torch.Tensor):
+        scale = np.array(scale.cpu())
+    if isinstance(center, torch.Tensor):
+        center = np.array(center.cpu())
+    if not isinstance(scale, np.ndarray) and not isinstance(scale, list):
+        scale = np.array([scale, scale])
+
+    scale_tmp = scale
+    src_w, src_h = scale_tmp[0], scale_tmp[1]
+    dst_w, dst_h = output_size[0], output_size[1]
+
+    # rot_rad = np.pi * rot / 180
+    if src_w >= src_h:
+        src_dir = get_dir([0, src_w * -0.5], rot_rad)
+        dst_dir = np.array([0, dst_w * -0.5], np.float32)
+    else:
+        src_dir = get_dir([src_h * -0.5, 0], rot_rad)
+        dst_dir = np.array([dst_h * -0.5, 0], np.float32)
+
+    src = np.zeros((3, 2), dtype=np.float32)
+    dst = np.zeros((3, 2), dtype=np.float32)
+    src[0, :] = center + scale_tmp * shift     # x,y
+    src[1, :] = center + src_dir + scale_tmp * shift
+    dst[0, :] = [dst_w * 0.5, dst_h * 0.5]
+    dst[1, :] = np.array([dst_w * 0.5, dst_h * 0.5]) + dst_dir
+
+    src[2:, :] = get_3rd_point(src[0, :], src[1, :])
+    dst[2:, :] = get_3rd_point(dst[0, :], dst[1, :])
+
+    if inv:
+        trans = cv2.getAffineTransform(np.float32(dst), np.float32(src))
+    else:
+        trans = cv2.getAffineTransform(np.float32(src), np.float32(dst))
+
+    return trans
+
+
+def rot_around_top_left(w, h, rot, data_numpy):
+    rot_matrix = np.array([[np.cos(rot), -np.sin(rot)],
+                           [np.sin(rot), np.cos(rot)]])
+
+    origin_center = np.array([[w / 2],
+                              [h / 2]])
+
+    center = rot_matrix @ origin_center
+
+    trans = get_affine_transform(center[:, 0], [w, h], rot, [w, h])
+    output = cv2.warpAffine(data_numpy, trans, (w, h),
+                            flags=cv2.INTER_LINEAR)
+
+    return output
+
+
+
 @DETECTORS.register_module()
 class CenterPoint(MVXTwoStageDetector):
     """Base class of Multi-modality VoxelNet."""
@@ -148,6 +230,19 @@ class CenterPoint(MVXTwoStageDetector):
                             outs[task_id][0][
                                 key][:, 0,
                                      ...] = -outs[task_id][0][key][:, 0, ...]
+                    data_numpy = outs[task_id][0][key][0].cpu().numpy().transpose(1, 2, 0)
+                    h, w, c = data_numpy.shape
+                    # print(img_meta[0].keys())
+                    # exit()
+                    rot = img_meta[0]['pcd_rotation_angle']
+
+                    output = rot_around_top_left(w=w, h=h,
+                                                 data_numpy=data_numpy, rot=rot)
+                    if c == 1:
+                        output = output[:, :, None]
+                    assert outs[task_id][0][key].shape[0] == 1
+                    outs[task_id][0][key][0] = torch.from_numpy(
+                        output.transpose(2, 0, 1)).to(outs[task_id][0][key][0].device)
 
             outs_list.append(outs)
 

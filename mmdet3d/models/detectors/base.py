@@ -31,7 +31,6 @@ class Base3DDetector(BaseDetector):
                     name, type(var)))
 
         num_augs = len(points)
-        # print(points[0][0].shape, flush=True)
         if num_augs != len(img_metas):
             raise ValueError(
                 'num of augmentations ({}) != num of image meta ({})'.format(
